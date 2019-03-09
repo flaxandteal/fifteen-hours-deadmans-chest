@@ -1,0 +1,456 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>reveal.js</title>
+
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/obig.css">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+		<link href="https://fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet">
+<style>
+#left {
+  left:-8.33%;
+  text-align: left;
+  float: left;
+  width:50%;
+  z-index:-10;
+}
+
+#right {
+  left:31.25%;
+  top: 75px;
+  float: right;
+  text-align: right;
+  z-index:-10;
+  width:50%;
+}
+</style>
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section data-background-size="fit" data-background-position="50% 90%" data-background="images/cover.png">
+				  <aside class="notes">
+				  </aside>
+				</section>
+				<section>
+				  <h2>WIP: Deadman's Chest</h2>
+				  <ul>
+				    <li>Wanted to have a deadman's switch target</li>
+				    <li>Without additional costs</li>
+				    <li>Integrated tightly with Prometheus/AM</li>
+				  </ul>
+				  <img src="images/adventurer-pirate.png" width="1000px" />
+				  <ul>
+				    <li></li>
+				  </ul>
+				  <aside class="notes">
+				  </aside>
+				</section>
+				<section data-background-size="contain" data-background="images/adventurer-deadman.png">
+				  <aside class="notes">
+				  </aside>
+				</section>
+				<section>
+				  <p>https://github.com/gouthamve/deadman</p>
+				  <img src="images/gouthamve.png"/>
+				  <aside class="notes">
+				  </aside>
+				</section>
+				<section>
+				  <img src="images/go.png"/>
+				  <aside class="notes">
+				  </aside>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+	"encoding/json"
+	"net/http"
+	"path/filepath"
+	"log/level"
+	"prometheus"
+	"errors"
+	"...prometheus/promhttp"
+	"...promlog"
+	kingpin "gopkg.in/alecthomas/kingpin.v2"
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+extern crate slog;
+extern crate chan;
+extern crate futures;
+extern crate hyper;
+extern crate mime;
+extern crate lazy_static;
+extern crate prometheus;
+extern crate tokio;
+extern crate serde_derive;
+extern crate serde_json;
+extern crate clap;
+extern crate deadman;
+extern crate humantime;
+extern crate slog;
+extern crate slog_async;
+extern crate slog_term;
+</pre></code>
+					</div>
+				</section>
+				<section>
+<pre><code class="rust" data-trim data-noescape>
+use futures::future::Loop;
+use futures::future::LoopFn;
+use futures::future::{err, ok, Future};
+use hyper::header::{HeaderValue, CONTENT_TYPE};
+use hyper::service::service_fn_ok;
+use hyper::{Body, Method, Response, Server, StatusCode};
+use tokio::prelude::FutureExt;
+use mime::Mime;
+use slog::Level;
+use slog::Logger;
+use slog::Drain;
+use slog::LevelFilter;
+use clap::{App, Arg};
+use humantime::parse_duration;
+use slog::Level;
+use slog::Logger;
+use prometheus::{Counter, Encoder, TextEncoder};
+</code></pre>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+for {
+ select {
+ case <-d.ticker.C:
+  ticksTotal.Inc()
+
+  if !skip {
+   ticksNotified.Inc()
+	   ...
+  }
+  skip = false
+
+ case <-d.pinger:
+  skip = true
+ }
+}
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+futures::future::loop_fn(first, move |first| {
+    if first {
+        return ok(Continue(false))
+    }
+    chan_select! {
+        ticker.recv() => {
+	...
+        },
+        pinger.recv() => {
+	...
+        }
+    };
+    if exit {
+      ok(Break(false))
+    } else {
+      ok(Continue(false))
+    }
+})
+</code></pre>
+					</div>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+pinger := make(chan time.Time)
+d, err := NewDeadMan(
+  pinger,
+  time.Duration(cfg.interval),
+  cfg.amURL,
+  log.With(logger, "component", "deadman")
+)
+go http.ListenAndServe(
+    ":9095", nil)
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+let mut deadman = Deadman::new(
+  cfg.interval,
+  notifier,
+  logger,
+  cfg.service_name
+);
+run(hyper::rt::lazy(move || {
+    spawn(deadman.start());
+    spawn(deadman.serve());
+    spawn(deadman.serve_status());
+    Ok(())
+}));
+</code></pre>
+					</div>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+alerts := []*model.Alert{{
+Labels: model.LabelSet{
+  model.LabelName("alertname"):
+   model.LabelValue("DeadmanDead"),
+},
+}}
+
+b, err := json.Marshal(alerts)
+
+return func() error {
+client := &http.Client{}
+resp, err := client.Post(
+  amURL,
+  "application/json",
+  bytes.NewReader(b)
+)
+...
+return nil
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+let connector = HttpConnector::new(1);
+let client = Client::builder().build(connector);
+let uri: Uri = alertmanager_url.parse().unwrap();
+
+let mut alert_labels = serde_json::Map::new();
+alert_labels.insert(
+  "alertname".to_string(),
+  json!("DeadmanDead"));
+...
+let req = hyper::Request::builder()
+.method(Method::POST)
+.uri(uri)
+.header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+.body(Body::from(body))
+.unwrap();
+
+let fut = client
+.request(req)
+hyper::rt::spawn(fut);
+Ok(())
+</code></pre>
+					</div>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+ticksTotal = prometheus.NewCounter(
+  prometheus.CounterOpts{
+    Name: "deadman_ticks_total",
+    Help: "The total ticks passed in this snitch",
+  },
+)
+...
+prometheus.MustRegister(
+  ticksTotal,
+  ticksNotified,
+  failedNotifications,
+)
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+lazy_static! {
+static ref PROM_TICKS_TOTAL: Counter =
+  register_counter!(opts!(
+    "deadman_ticks_total",
+    "The total ticks passed in this snitch",
+    labels! {"handler" => "all",}
+  ))
+.unwrap();
+...
+}
+</code></pre>
+					</div>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+app := kingpin.New(filepath.Base(os.Args[0]),
+  "A deadman's snitch for Prometheus Alertmanager compatible notifications.")
+app.HelpFlag.Short('h')
+
+app.Flag("am.url", "The URL to POST alerts to.").
+  Default("http://localhost:9093/api/v1/alerts").StringVar(&cfg.amURL)
+app.Flag("deadman.interval", "The heartbeat interval. An alert is sent if no heartbeat is sent.").
+  Default("30s").SetValue(&cfg.interval)
+promlogflag.AddFlags(app,
+  &cfg.promlogConfig)
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+let matches = App::new("Deadman Rust")
+   ...
+ .arg(
+Arg::with_name("alertmanager-url")
+ .long("am.url")
+ .value_name("URL")
+ .help("The URL to POST alerts to.")
+ .default_value("http://localhost:9093/api/v1/alerts")
+ .takes_value(true),
+ )
+ .get_matches();
+
+let am_url = matches.value_of(
+  "alertmanager-url"
+)
+ .unwrap().to_string();
+...
+</code></pre>
+					</div>
+				</section>
+				<section>
+					<div id="left">
+<pre><code class="go" data-trim data-noescape>
+logger := promlog.New(
+  &cfg.promlogConfig)
+</code></pre>
+					</div>
+					<div id="right">
+<pre><code class="rust" data-trim data-noescape>
+let decorator = slog_term::
+  TermDecorator::new().build();
+let drain = slog_term::
+  FullFormat::new(decorator)
+   .build().fuse();
+let drain = slog_async::
+  Async::new(drain).build().fuse();
+let drain = LevelFilter::new(
+  drain, log_level).fuse();
+</code></pre>
+					</div>
+				</section>
+				<section>
+<pre><code class="errorlog" data-trim data-noescape>
+Feb 12 ... DEBG [starting event loop]
+Feb 12 ... DEBG [spawning counter]
+Feb 12 ... DEBG Starting loop...
+Feb 12 ... DEBG Interval: 600s
+Feb 12 ... DEBG [spawning serve]
+Feb 12 ... DEBG [spawning status serve]
+Feb 12 ... DEBG [spawns complete]
+Feb 12 ... DEBG ==>
+Feb 12 ... DEBG Received liveness check [status]
+Feb 12 ... DEBG ==>
+</code></pre>
+				</section>
+				<section>
+<pre><code class="shell" data-trim data-noescape>
+$ docker run --entrypoint /bin/bash \
+  --rm -it -v "$(pwd)":/home/rust/src ekidd/rust-musl-builder
+
+[sh]$ cargo build --release
+</code></pre>
+<aside class="notes">dockerignore</aside>
+				</section>
+			    <section>
+<pre><code class="docker" data-trim data-noescape>
+FROM scratch
+ADD ./deadman/target/x86_64-unknown-linux-musl/release/deadman /
+EXPOSE 9095
+ENTRYPOINT ["/deadman"]
+</code></pre>
+<pre><code class="shell" data-trim data-noescape>
+$ docker images
+flaxandteal/deadman experimental 5593973a2037     11.8MB
+</code></pre>
+			    </section>
+<section>
+<img src='images/notification.png'/>
+</section>
+<section>
+<img src='images/alertmanager.png'/>
+</section>
+<section>
+<img src='images/chart.png'/>
+</section>
+<section>
+<pre><code class="yaml" data-trim data-noescape>
+- name: {{ .Chart.Name }}
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  command:
+    - /deadman
+    - --am.url={{ .Values.alertmanagerUrl }}
+    - --deadman.interval={{- .Values.interval -}}s
+    - --deadman.service="{{- .Values.serviceName }}"
+    - --log.level={{- .Values.logLevel }}
+  ports:
+    - name: http-alive
+      containerPort: 9095
+      protocol: TCP
+    - name: http-status
+      containerPort: 8080
+      protocol: TCP
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: http-status
+  readinessProbe:
+    httpGet:
+      path: /healthz
+      port: http-status
+</code></pre>
+</section>
+<section>
+<pre><code class="yaml" data-trim data-noescape>
+[values.yaml]
+...
+alertmanagerUrl: "http://alertmanager-operated.srv-monitoring.svc.cluster.local:9093/api/v1/alerts"
+interval: 600 # seconds
+logLevel: "debug"
+serviceName: "my-service @philtweir"
+</code></pre>
+</section>
+<section>
+<img src='images/linkage.png'/></section>
+<section>
+<h3>Useful takeaways</h3>
+</section>
+		</div>
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.js"></script>
+
+		<script>
+			// More info about config & dependencies:
+			// - https://github.com/hakimel/reveal.js#configuration
+			// - https://github.com/hakimel/reveal.js#dependencies
+			Reveal.initialize({
+				parallaxBackgroundImage: 'images/obig-presentation2-back.png',
+				backgroundTransition: 'slide',
+				history: true,
+				dependencies: [
+					{ src: 'plugin/markdown/marked.js' },
+					{ src: 'plugin/markdown/markdown.js' },
+					{ src: 'plugin/data-src-svg/data-src-svg.babel.js' },
+					{ src: 'plugin/notes/notes.js', async: true },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } }
+				]
+			});
+		</script>
+	</body>
+</html>
